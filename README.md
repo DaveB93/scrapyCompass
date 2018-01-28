@@ -16,10 +16,10 @@ Edit compass.py and input
 
 ## Running
 
-###To Run:
+### To Run:
  `scrapy runspider compass.py`
 
-###To Automate:
+### To Automate:
  
 #### On Windows:
   make a batch file with the above command and create a scheduled task
