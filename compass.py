@@ -51,13 +51,10 @@ class compassSpider(Spider):
                                         callback=self.parse1)
 
     def parse1(self, response):
-        #from scrapy.shell import inspect_response
-        #inspect_response(response, self)
         val = response.css("span.value-text-style::text").extract()[0].strip()
         if (val != expectedBalance):
             sendemail(expectedBalance, val)
         else:
             print( "value is fine")
-        #open_in_browser(response)
 
 
