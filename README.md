@@ -12,7 +12,7 @@ Before you run this, you should collect the following
 - your compass card cvn
 - your email ( currently it's set up for gmail )
 - your gmail password ( you'll want to generate an app specific password, see instructions below if you need help)
-- the maximum amount you expect your balance to change between runs
+- the maximum amount you expect your balance to change between runs ( 0 for monthly )
 
 ## Running
 
@@ -29,7 +29,7 @@ Before you run this, you should collect the following
   I personally have it set to run once a day about an hour after I last usually travel.
 
 
-### To Re-set up:
+## To Re-set up:
  Either modify the .ini file directly or run 
   `scrapy runspider compass.py -a reconfig=1`
 
@@ -42,3 +42,9 @@ Before you run this, you should collect the following
 1. in the dropdown at the bottom, enter a custom name (that you'll remember for the app password)
 1. click Generate
 1. make a copy of this password, you'll only get it once
+
+
+## Todo
+
+* error handling.  If compass changes their site, or we fail to parse for some reason, send an email 
+* potentially handle multiple compass cards and CVNs
