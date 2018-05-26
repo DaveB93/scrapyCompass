@@ -12,6 +12,7 @@ configfileName = 'compassConfig.ini'
 INIT_STORED_VALUE = '$-9999'
 INIT_STORED_VALUE_AS_CENTS = -999900
 
+
 def sendemail(sender, passw, subject, message):
     receivers = [sender]
     user = sender
@@ -42,16 +43,43 @@ def inputWithDefault(askFor, config, path):
         return input(question)
 
 
+class Mailer():
+    def __init__(self, account, password):
+        self.account = account
+        self.password = password
+
+    def initNew(self, val):
+        message =  'Compass balance initialized it is \'{}\''.format(val)
+        sendemail(self.account, self.password, "Compass Balance initialized", message)
+
+    def valueLow(self, balanceCents, expectedBalanceCents, compassCardLastStoredValueCents):
+        message =  'Compass balance should be \'${:.2f}\' instead it is \'${:.2f}\',  Previous Balance was \'${:.2f}\''.format(expectedBalanceCents/100, balanceCents/100, compassCardLastStoredValueCents/100)
+        sendemail(self.account, self.password, "Compass Balance is different", message)
+
+    def valueOkay(self):
+        print( "value is fine")
+
+    def balanceUnexpectedLessThanAutoload(self, balanceCents, expectedBalanceCents, compassCardLastStoredValueCents):
+        message = 'Balance is higher than expected but lower than autoload?  previous balance \'${:.2f}\' it should be atleast \'${:.2f}\' actual balance \'${:.2f}\''.format(compassCardLastStoredValueCents/100,expectedBalanceCents/100, balanceCents/100)
+        sendemail(self.account, self.password, "Compass Balance Higher Than Expected", message)
+
+    def balanceUnexpectedGreaterThanAutoload(self, balanceCents, expectedBalanceCents, compassCardLastStoredValueCents):
+        message = 'Balance is higher than expected and higher than autoload?  previous balance \'${:.2f}\' it should be \'${:.2f}\' actual balance \'${:.2f}\''.format(compassCardLastStoredValueCents/100,expectedBalanceCents/100, balanceCents/100)
+        sendemail(self.account, self.password, "Compass Balance Higher Than Expected", message)
+
+
+
+
 class compassSpider(Spider):
     name = "compasscard"
     allowed_domains = ["compasscard.ca"]
     config = configparser.ConfigParser()
 
-    def start_requests(self):
+    def read_or_init_config(self):
         if os.path.isfile(configfileName):
             self.config.read(configfileName)
 
-        if (hasattr(self, 'reconfig')) or (not os.path.isfile(configfileName)):
+        if (hasattr(self, 'reconfig')) or (not 'config' in self.config) or (not 'version' in self.config['config']) or (self.config['config']['version'] != "1") or (not os.path.isfile(configfileName)):
             self.config["email"] = {
                 "account": inputWithDefault('gmail account', self.config, 'email/account'), 
                 "password": inputWithDefault('gmail account password', self.config, 'email/password')
@@ -60,11 +88,28 @@ class compassSpider(Spider):
                 "compassCardNumber": inputWithDefault('Compass Card Number', self.config, 'compass/compassCardNumber'), 
                 "compassCardCVN": inputWithDefault('Compass Card CVN', self.config, 'compass/compassCardCVN'),
                 "compassCardMaxChange": inputWithDefault('Compass Card Stored Value allowed maximum change between runs (0 for Monthly pass)', self.config, 'compass/compassCardMaxChange'),
-                "compassCardLastStoredValue": INIT_STORED_VALUE
+                "compassCardLastStoredValue": INIT_STORED_VALUE,
+                "compassCardAutoLoad": inputWithDefault('Compass Card Autoload Amount (0 for no Autoload)', self.config, 'compass/compassCardAutoLoad')
+            }
+            self.config["config"] = {
+                "version" : "1"
             }
             with open(configfileName, 'w') as cfgfile:
                 self.config.write(cfgfile)
                 cfgfile.close()
+        self.mailer = Mailer(self.config['email']['account'], self.config['email']['password'])
+
+
+
+
+    def updateStoredValue(self,val):
+        self.config['compass']['compassCardLastStoredValue'] = val
+        with open(configfileName, 'w') as cfgfile:
+            self.config.write(cfgfile)
+            cfgfile.close()
+
+    def start_requests(self):
+        self.read_or_init_config()
         yield Request("https://www.compasscard.ca")
 
 
@@ -79,23 +124,34 @@ class compassSpider(Spider):
 
     def parse1(self, response):
         val = response.css("span.value-text-style::text").extract()[0].strip()
-        cents_int = int(round(float(val.strip('$'))*100))
-        maxChangeCents = int(round(float(self.config['compass']['compassCardMaxChange'].strip('$'))*100))
-        compassCardLastStoredValue = int(round(float(self.config['compass']['compassCardLastStoredValue'].strip('$'))*100))
-        expectedBalance = compassCardLastStoredValue - maxChangeCents
-        if (compassCardLastStoredValue == INIT_STORED_VALUE_AS_CENTS):
-            message =  'Compass balance initialized it is \'{}\''.format(val)
-            sendemail(self.config['email']['account'], self.config['email']['password'], "Compass Balance initialized", message)
-        elif (cents_int < expectedBalance):
-            message =  'Compass balance should be \'${:.2f}\' instead it is \'${:.2f}\''.format(expectedBalance/100, cents_int/100)
-            sendemail(self.config['email']['account'], self.config['email']['password'], "Compass Balance is different", message)
-        else:
-            print( "value is fine")
-        self.config['compass']['compassCardLastStoredValue'] = val
-        with open(configfileName, 'w') as cfgfile:
-            self.config.write(cfgfile)
-            cfgfile.close()
+        self.parse2(val)
+        self.updateStoredValue(val)
 
+    def parse2(self, val):
+        balanceCents = int(round(float(val.strip('$'))*100))
+        maxChangeCents = int(round(float(self.config['compass']['compassCardMaxChange'].strip('$'))*100))
+        compassCardLastStoredValueCents = int(round(float(self.config['compass']['compassCardLastStoredValue'].strip('$'))*100))
+        expectedBalanceCents = compassCardLastStoredValueCents - maxChangeCents
+
+
+        if (compassCardLastStoredValueCents == INIT_STORED_VALUE_AS_CENTS):
+            self.mailer.initNew(val)
+        elif (balanceCents < expectedBalanceCents):
+            self.mailer.valueLow(balanceCents, expectedBalanceCents, compassCardLastStoredValueCents)
+        elif (balanceCents > compassCardLastStoredValueCents):
+            #if we auto loaded for the expected value this will be fine.  if there was a manual reload for more, or a refund ?
+            compassCardAutoLoadCents = int(round(float(self.config['compass']['compassCardAutoLoad'].strip('$'))*100))
+            balanceWithAutoload = expectedBalanceCents + compassCardAutoLoadCents
+            if (balanceCents == balanceWithAutoload):
+                expectedBalanceCents = balanceWithAutoload
+                self.mailer.valueOkay()
+            elif (balanceCents > balanceWithAutoload):
+                self.mailer.balanceUnexpectedGreaterThanAutoload(balanceCents, expectedBalanceCents, compassCardLastStoredValueCents)
+            else:
+                self.mailer.balanceUnexpectedLessThanAutoload(balanceCents, expectedBalanceCents, compassCardLastStoredValueCents)
+
+        else:
+            self.mailer.valueOkay()
 
 
 
